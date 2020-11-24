@@ -21,30 +21,36 @@
 #% keyword: select
 #% keyword: standard deviation
 #%end
+
 #%option G_OPT_R_INPUT
 #% key: mask
 #%end
+
 #%option G_OPT_R_INPUT
 #% key: input
 #% label: level 1 data
 #% multiple: yes
 #%end
+
 #%option G_OPT_R_INPUT
 #% key: subinput
 #% label: level 2 data
 #% multiple: yes
 #% required: no
 #%end
+
 #%option
 #% key: subdims
 #% type: string
 #% description: Submatrix dimension
 #%end
+
 #%option
 #% key: modelfile
 #% type: string
 #% description: model file name
 #%end
+
 #%option G_OPT_R_OUTPUT
 #% key: output
 #% label: Output Map

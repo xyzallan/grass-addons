@@ -97,7 +97,7 @@ def getData(dataLayer):
 def fitModel(y_train, x_train_sat, x_train_ldr):
     options, flags = gscript.parser()
     from keras.models import Sequential, Model
-    from keras.layers import Dense, Conv2D, Flatten, Input, concatenate
+    from keras.layers import Dense, Conv1D, Conv2D, Flatten, Input, concatenate
     
     optim_func = options['optimizer']
     loss_func = 'sparse_categorical_crossentropy'
@@ -106,6 +106,7 @@ def fitModel(y_train, x_train_sat, x_train_ldr):
     num_of_cl = (np.amax(y_train) + 1)
     
     satInput = Input(shape=(x_train_sat.shape[1], x_train_sat.shape[2], 1))
+    #satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
     satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
     satX = Flatten()(satX)
     satX = Dense(pow(num_of_cl, 3), activation = activ_func)(satX)
