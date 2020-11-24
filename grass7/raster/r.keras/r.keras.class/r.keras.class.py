@@ -129,7 +129,6 @@ def fitModel(y_train, x_train_sat, x_train_ldr, fileName):
     history = model.fit([x_train_sat, x_train_ldr], y_train, epochs = epoch_count)
     model.save("{}.h5".format(fileName))
 
-
 ############################################################################
 #
 ############################################################################
