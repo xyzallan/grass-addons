@@ -76,7 +76,7 @@ from grass.pygrass.raster import numpy2raster
 
 
 ############################################################################
-#
+# Reading data from layer
 ############################################################################
 def getData(dataLayer):
     print("Reading data: ", dataLayer)
