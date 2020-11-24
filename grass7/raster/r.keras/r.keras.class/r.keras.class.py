@@ -33,6 +33,7 @@
 #% key: subinput
 #% label: level 2 data
 #% multiple: yes
+#% required: no
 #%end
 #%option
 #% key: subdims
@@ -93,7 +94,7 @@ def getData(dataLayer):
 ############################################################################
 #
 ############################################################################
-def fitModel(y_train, x_train_sat, x_train_ldr, fileName):
+def fitModel(y_train, x_train_sat, x_train_ldr):
     options, flags = gscript.parser()
     from keras.models import Sequential, Model
     from keras.layers import Dense, Conv2D, Flatten, Input, concatenate
@@ -102,32 +103,32 @@ def fitModel(y_train, x_train_sat, x_train_ldr, fileName):
     loss_func = 'sparse_categorical_crossentropy'
     activ_func = options['activation']
     epoch_count = 5
+    num_of_cl = (np.amax(y_train) + 1)
     
     satInput = Input(shape=(x_train_sat.shape[1], x_train_sat.shape[2], 1))
     satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
     satX = Flatten()(satX)
-    satX = Dense(128, activation = activ_func)(satX)
-    satX = Dense(64, activation = activ_func)(satX)
+    satX = Dense(pow(num_of_cl, 3), activation = activ_func)(satX)
+    satX = Dense(pow(num_of_cl, 2), activation = activ_func)(satX)
     satX = Model(inputs = satInput, outputs = satX)
     #print(satX.summary())
 
     ldrInput = Input(shape=(x_train_ldr.shape[1],))
-    ldrX = Dense(64, activation = activ_func)(ldrInput)
-    ldrX = Dense(32, activation = activ_func)(ldrX)
+    ldrX = Dense(pow(num_of_cl, 3), activation = activ_func)(ldrInput)
+    ldrX = Dense(pow(num_of_cl, 2), activation = activ_func)(ldrX)
     ldrX = Model(inputs = ldrInput, outputs = ldrX)
     #print(ldrX.summary())
 
     combined = concatenate([satX.output, ldrX.output])
-    number_of_classes = np.amax(y_train)+1
 
-    finX = Dense(32, activation = activ_func)(combined)
-    finX = Dense(number_of_classes, activation='softmax')(finX)
+    finX = Dense(pow(num_of_cl, 2), activation = activ_func)(combined)
+    finX = Dense(num_of_cl, activation='softmax')(finX)
 
     model = Model([satX.input, ldrX.input], outputs = finX)
     print(model.summary())
     model.compile(optimizer=optim_func, loss=loss_func, metrics=["accuracy"])
     history = model.fit([x_train_sat, x_train_ldr], y_train, epochs = epoch_count)
-    model.save("{}.h5".format(fileName))
+    model.save("{}.h5".format(options['modelfile']))
 
 ############################################################################
 #
@@ -153,7 +154,7 @@ def main():
 
     x_train_subinput = x_train_subinput.reshape((x_train_subinput.shape[0], subDims[0], subDims[1]))
     print(x_train_subinput.shape)
-    fitModel(y_train, x_train_subinput, x_train_input, options['modelfile'])
+    fitModel(y_train, x_train_subinput, x_train_input)
     return 0
 
 
