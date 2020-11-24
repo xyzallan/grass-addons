@@ -16,168 +16,147 @@
 ############################################################################
 
 #%module
-#% description: Supervised classification and regression of GRASS rasters using the python tensorflow and keras packages
+#% description: Selects values from raster above value of mean plus standard deviation
 #% keyword: raster
-#% keyword: classification
-#% keyword: machine learning
-#% keyword: tensorflow
-#% keyword: keras
+#% keyword: select
+#% keyword: standard deviation
 #%end
-
-#%option G_OPT_I_GROUP
-#% key: group
-#% label: Group of raster layers to be classified
-#% description: GRASS imagery group of raster maps representing feature variables to be used in the machine learning model
-#% required: yes
-#% multiple: no
-#%end
-
 #%option G_OPT_R_INPUT
-#% key: trmap
-#% label: Labelled pixels
-#% description: Raster map with labelled pixels for training
+#% key: classes
+#%end
+#%option G_OPT_R_INPUT
+#% key: input
+#% label: level 1 data
+#% multiple: yes
+#%end
+#%option G_OPT_R_INPUT
+#% key: subinput
+#% label: level 2 data
+#% multiple: yes
+#%end
+#%option
+#% key: subdims
+#% type: string
+#% description: Submatrix dimension
+#%end
+#%option
+#% key: modelfile
+#% type: string
+#% description: model file name
+#%end
+#%option string
+#% key: activation
+#% label: Activation
+#% description: Activation function
+#% answer: tanh
+#% options: relu,sigmoid,softmax,softplus,softsigh,tanh,selu,elu
+#% guisection: Classifier settings
 #% required: no
-#% guisection: Required
+#%end
+#%option string
+#% key: optimizer
+#% label: Optimizer
+#% description: Supervised learning model to use
+#% answer: adam
+#% options: adam,adamax,SGD
+#% guisection: Classifier settings
+#% required: no
 #%end
 
-#%option G_OPT_R_OUTPUT
-#% key: output
-#% label: Labelled pixels
-#% description: Raster map with labelled pixels for training
-#% required: no
-#% guisection: Required
-#%end
 
+import sys
+import numpy as np
 
-import atexit
-import os, glob
-import grass.script as gs
-from grass.pygrass.modules.shortcuts import raster as r
+import grass.script as gscript
+from grass.exceptions import CalledModuleError
+
 from grass.pygrass.gis.region import Region
 from grass.pygrass.raster import RasterRow
 from grass.pygrass.raster import numpy2raster
 
 
 ############################################################################
-# Checking and Loading required packages
-############################################################################
-def loadPackages():
-    try:
-        globals()["np"] = __import__("numpy")
-    except:
-        gs.fatal("Package numpy is not installed")
-        exit()
-    try:
-        globals()["Model"] = __import__("keras").models.Model
-        globals()["Sequential"] = __import__("keras").models.Sequential
-        globals()["Dense"] = __import__("keras").layers.Dense
-        globals()["Conv2D"] = __import__("keras").layers.Conv2D
-        globals()["Flatten"] = __import__("keras").layers.Flatten
-        globals()["Input"] = __import__("keras").layers.Input
-        #globals()["concatenate"] = __import__("keras").layers.concatenate
-    except:
-        gs.fatal("Packages keras and tensorflow are not installed")
-        exit()
-    try:
-        globals()["train_test_split"] = __import__("sklearn.model_selection", fromlist = ['train_test_split']).train_test_split
-        globals()["LabelEncoder"] = __import__("sklearn.preprocessing", fromlist = ['LabelEncoder']).LabelEncoder
-        #from sklearn.preprocessing import LabelEncoder
-    except:
-        gs.fatal("Package sklearn is not installed")
-        exit()
-    
-############################################################################
-#
-############################################################################
-def cleanup():
-    for rast in tmp_rast:
-        gs.run_command(
-            "g.remove", name=rast, type='raster', flags='f', quiet=True)
-
-############################################################################
 #
 ############################################################################
 def getData(dataLayer):
+    print("Reading data: ", dataLayer)
     if RasterRow(dataLayer).exist() is True:
         dataFile = RasterRow(dataLayer)
         dataFile.open('r')
         data = np.array(dataFile)
+        data[np.isnan(data)] = 0
         return data
     else:
-        print("Missing", dataLayer)
-    
+        print("Is missing: ", dataLayer)
+
+
 ############################################################################
 #
 ############################################################################
-def prepare_targets(y_train, y_test):
-    le = LabelEncoder()
-    le.fit(y_train)
-    y_train_enc = le.transform(y_train)
-    y_test_enc = le.transform(y_test)
-    return y_train_enc, y_test_enc    
+def fitModel(y_train, x_train_sat, x_train_ldr, fileName):
+    options, flags = gscript.parser()
+    from keras.models import Sequential, Model
+    from keras.layers import Dense, Conv2D, Flatten, Input, concatenate
+    
+    optim_func = options['optimizer']
+    loss_func = 'sparse_categorical_crossentropy'
+    activ_func = options['activation']
+    epoch_count = 5
+    
+    satInput = Input(shape=(x_train_sat.shape[1], x_train_sat.shape[2], 1))
+    satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
+    satX = Flatten()(satX)
+    satX = Dense(128, activation = activ_func)(satX)
+    satX = Dense(64, activation = activ_func)(satX)
+    satX = Model(inputs = satInput, outputs = satX)
+    #print(satX.summary())
+
+    ldrInput = Input(shape=(x_train_ldr.shape[1],))
+    ldrX = Dense(64, activation = activ_func)(ldrInput)
+    ldrX = Dense(32, activation = activ_func)(ldrX)
+    ldrX = Model(inputs = ldrInput, outputs = ldrX)
+    #print(ldrX.summary())
+
+    combined = concatenate([satX.output, ldrX.output])
+    number_of_classes = np.amax(y_train)+1
+
+    finX = Dense(32, activation = activ_func)(combined)
+    finX = Dense(number_of_classes, activation='softmax')(finX)
+
+    model = Model([satX.input, ldrX.input], outputs = finX)
+    print(model.summary())
+    model.compile(optimizer=optim_func, loss=loss_func, metrics=["accuracy"])
+    history = model.fit([x_train_sat, x_train_ldr], y_train, epochs = epoch_count)
+    model.save("{}.h5".format(fileName))
+
 
 ############################################################################
 #
 ############################################################################
 def main():
-    print("Starting r.keras.class")
-    loadPackages()
+    options, flags = gscript.parser()
+    class_raster = getData(options['classes'])
+    print(class_raster.shape)
+    y_train = class_raster[class_raster > 0]
+    print(y_train.shape)
+    input_files = (options['input']).split(',')
+    x_train_input = np.zeros((y_train.shape[0], len(input_files)))
+    print(x_train_input.shape)
+    for i in range(len(input_files)):
+        x_train_input[:,i] = getData(input_files[i])[class_raster > 0]
+    subDims = tuple(np.array(options['subdims'].split(",")).astype(np.int))
+    print(subDims)
 
-    # required gui section
-    trainingmap = options['trmap']
-    response_np = getData(trainingmap)
-    print(response_np.shape)
-    trData = response_np[response_np > 0]
-    group = options['group']
-    maplist = gs.read_command("i.group", group=group, flags="g").split(os.linesep)[:-1]
-    inputData = np.zeros((trData.shape[0], len(maplist)))
-    inputAllData = np.zeros((response_np.shape[0],response_np.shape[1], len(maplist)))
-    #allData = np.zeros((trData.shape[0], trData.shape[1], len(maplist)))
-    numberOfInputs = len(maplist)
-    for i in range(numberOfInputs):
-        tmp = getData(maplist[i])
-        print(maplist[i], tmp.shape)
-        inputData[:,i] = tmp[response_np > 0]
-        inputAllData[:,:,i] = tmp
+    subinput_files = (options['subinput']).split(',')
+    x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)))
+    for i in range(len(subinput_files)):
+        x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
 
-    print(maplist)
-    print(inputData.shape)
-    
-    print(trData.shape)
-    u = sorted(np.unique(trData))
-    print(u)
-    numberOfClasses = len(u)
-    trData2 = np.zeros((trData.shape[0]), dtype=np.int)
-    print(trData2.shape)
-    for i in range(len(u)):
-        print(u[i], "=>", np.sum(np.where(trData == u[i], 1, 0)))
-        trData2[trData == u[i]] = i
-
-    print(trData2.shape)
-    print(inputData.shape)
-    inpShape = (1, inputData.shape[1])
-    print(inpShape)
-    inputData2 = inputData.reshape((inputData.shape[0], 1, inputData.shape[1]))
-
-    predModel = Sequential([
-        Flatten(input_shape=inpShape),
-        Dense(pow(numberOfClasses, 3), activation="relu"),
-        Dense(pow(numberOfClasses, 2), activation="relu"),
-        Dense(numberOfClasses, activation="softmax")
-    ])
-    
-    predModel.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    print(predModel.summary())
-    inputData2.tofile("test.txt", sep="", format="%s")
-    predModel.fit(inputData2, trData2, epochs=10)
-    predModel.save("path_to_my_model.h5")
-    #prediction = 
-    #numpy2raster(array=prediction, mtype='CELL', rastname=options['output'], overwrite=True)
-                
+    x_train_subinput = x_train_subinput.reshape((x_train_subinput.shape[0], subDims[0], subDims[1]))
+    print(x_train_subinput.shape)
+    fitModel(y_train, x_train_subinput, x_train_input, options['modelfile'])
+    return 0
 
 
-tmp_rast = []
 if __name__ == "__main__":
-    options, flags = gs.parser()
-    atexit.register(cleanup)
-    main()
+    sys.exit(main())
