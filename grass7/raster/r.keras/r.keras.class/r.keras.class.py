@@ -24,15 +24,13 @@
 #%option G_OPT_R_INPUT
 #% key: classes
 #%end
-#%option G_OPT_R_INPUT
+#%option G_OPT_I_INPUT
 #% key: input
 #% label: level 1 data
-#% multiple: yes
 #%end
-#%option G_OPT_R_INPUT
+#%option G_OPT_I_INPUT
 #% key: subinput
 #% label: level 2 data
-#% multiple: yes
 #% required: no
 #%end
 #%option
@@ -65,7 +63,7 @@
 #%end
 
 
-import sys
+import sys, os
 import numpy as np
 
 import grass.script as gscript
@@ -104,10 +102,10 @@ def fitModel(y_train, x_train_sat, x_train_ldr):
     activ_func = options['activation']
     epoch_count = 5
     num_of_cl = (np.amax(y_train) + 1)
-    
-    satInput = Input(shape=(x_train_sat.shape[1], x_train_sat.shape[2], 1))
+    print(x_train_sat.shape)
+    satInput = Input(shape=(x_train_sat.shape[1], 1))
     #satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
-    satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
+    satX = Conv1D(256, (x_train_sat.shape[1]), activation=activ_func)(satInput)
     satX = Flatten()(satX)
     satX = Dense(pow(num_of_cl, 3), activation = activ_func)(satX)
     satX = Dense(pow(num_of_cl, 2), activation = activ_func)(satX)
@@ -129,31 +127,36 @@ def fitModel(y_train, x_train_sat, x_train_ldr):
     print(model.summary())
     model.compile(optimizer=optim_func, loss=loss_func, metrics=["accuracy"])
     history = model.fit([x_train_sat, x_train_ldr], y_train, epochs = epoch_count)
-    model.save("{}.h5".format(options['modelfile']))
+    model.save(options['modelfile'])
 
 ############################################################################
 #
 ############################################################################
 def main():
     options, flags = gscript.parser()
+
+    input_files = gscript.read_command("i.group", group=options['input'], flags="g").split(os.linesep)[:-1]
+    print(input_files)
+    subinput_files = gscript.read_command("i.group", group=options['subinput'], flags="g").split(os.linesep)[:-1]
+    print(subinput_files)
+    
     class_raster = getData(options['classes'])
     print(class_raster.shape)
     y_train = class_raster[class_raster > 0]
     print(y_train.shape)
-    input_files = (options['input']).split(',')
     x_train_input = np.zeros((y_train.shape[0], len(input_files)))
     print(x_train_input.shape)
     for i in range(len(input_files)):
         x_train_input[:,i] = getData(input_files[i])[class_raster > 0]
-    subDims = tuple(np.array(options['subdims'].split(",")).astype(np.int))
-    print(subDims)
+    #subDims = tuple(np.array(options['subdims'].split(",")).astype(np.int))
+    #print(subDims)
 
-    subinput_files = (options['subinput']).split(',')
+    #subinput_files = (options['subinput']).split(',')
     x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)))
     for i in range(len(subinput_files)):
         x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
 
-    x_train_subinput = x_train_subinput.reshape((x_train_subinput.shape[0], subDims[0], subDims[1]))
+    #x_train_subinput = x_train_subinput.reshape((x_train_subinput.shape[0], subDims[0], subDims[1]))
     print(x_train_subinput.shape)
     fitModel(y_train, x_train_subinput, x_train_input)
     return 0
