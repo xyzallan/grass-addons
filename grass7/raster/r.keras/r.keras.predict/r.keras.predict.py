@@ -95,8 +95,8 @@ def main():
     print(input_files)
     subinput_files = gscript.read_command("i.group", group=options['subinput'], flags="g").split(os.linesep)[:-1]
     print(subinput_files)
-    
     class_raster = getData(options['mask'])
+        
     print(class_raster.shape)
     y_train = class_raster[class_raster > 0]
     print(y_train.shape)

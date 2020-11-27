@@ -7,7 +7,7 @@
 #
 # AUTHOR:        Allan Sims
 #
-# PURPOSE:       Supervised classification and regression of GRASS rasters
+# PURPOSE:       Supervised classification of GRASS rasters 
 #                using the python keras.io package
 #
 # COPYRIGHT: (c) 2020 Allan Sims, and the GRASS Development Team
@@ -23,30 +23,28 @@
 #%end
 #%option G_OPT_R_INPUT
 #% key: classes
+#% description: Training classes
 #%end
 #%option G_OPT_I_INPUT
 #% key: input
-#% label: level 1 data
+#% label: Level data
+#% description: Input data
 #%end
 #%option G_OPT_I_INPUT
 #% key: subinput
-#% label: level 2 data
+#% label: Sublevel data
+#% description: Input data
 #% required: no
-#%end
-#%option
-#% key: subdims
-#% type: string
-#% description: Submatrix dimension
 #%end
 #%option
 #% key: modelfile
 #% type: string
-#% description: model file name
+#% description: model output file name
 #%end
 #%option string
 #% key: activation
 #% label: Activation
-#% description: Activation function
+#% description: Activation function used for fitting
 #% answer: tanh
 #% options: relu,sigmoid,softmax,softplus,softsigh,tanh,selu,elu
 #% guisection: Classifier settings
@@ -55,16 +53,15 @@
 #%option string
 #% key: optimizer
 #% label: Optimizer
-#% description: Supervised learning model to use
+#% description: Optimizer used for fitting
 #% answer: adam
 #% options: adam,adamax,SGD
 #% guisection: Classifier settings
 #% required: no
 #%end
 
-
 import sys, os
-import numpy as np
+#import numpy as np
 
 import grass.script as gscript
 from grass.exceptions import CalledModuleError
@@ -72,6 +69,15 @@ from grass.exceptions import CalledModuleError
 from grass.pygrass.gis.region import Region
 from grass.pygrass.raster import RasterRow
 from grass.pygrass.raster import numpy2raster
+
+#from keras.models import Sequential, Model
+#from keras.layers import Dense, Conv1D, Conv2D, Flatten, Input, concatenate
+
+import tensorflow as tf
+import numpy as np
+from tensorflow import keras
+from tensorflow.keras import layers, models
+
 
 
 ############################################################################
@@ -92,31 +98,79 @@ def getData(dataLayer):
 ############################################################################
 #
 ############################################################################
-def fitModel(y_train, x_train_sat, x_train_ldr):
+def fitModelWithSub(y_tr, x_tr_subinput, x_tr_input):
     options, flags = gscript.parser()
-    from keras.models import Sequential, Model
-    from keras.layers import Dense, Conv1D, Conv2D, Flatten, Input, concatenate
     
     optim_func = options['optimizer']
     loss_func = 'sparse_categorical_crossentropy'
+    #loss_func = 'categorical_crossentropy'
+    #loss_func = options['loss']
     activ_func = options['activation']
     epoch_count = 5
+
+    y_tr_c = keras.utils.to_categorical(y_tr)
+    num_classes = y_tr_c.shape[1]
+    x_tr_subinput = np.expand_dims(x_tr_subinput, -1)
+
+    print(x_tr_subinput.shape)
+
+    input_1 = keras.Input(shape=x_tr_subinput.shape[1:])
+    seq_1 = layers.Conv1D(256, kernel_size=x_tr_subinput.shape[1], activation=activ_func)(input_1)
+    seq_1 = layers.Dense(pow(num_classes, 3), activation=activ_func)(seq_1)
+    seq_1 = layers.Dense(pow(num_classes, 2), activation=activ_func)(seq_1)
+    seq_1 = layers.Flatten()(seq_1)
+    mudel1 = models.Model(inputs = input_1, outputs = seq_1)
+    print(mudel1.summary())
+
+    input_2 = keras.Input(shape=x_tr_input.shape[1:])
+    seq_2 = layers.Dense(pow(num_classes, 3), activation=activ_func)(input_2)
+    seq_2 = layers.Dense(pow(num_classes, 2), activation=activ_func)(seq_2)
+    mudel2 = models.Model(inputs = input_2, outputs = seq_2)
+    print(mudel2.summary())
+
+    combined = keras.layers.concatenate([mudel1.output, mudel2.output])
+
+    mudelLopp = layers.Dense(64, activation=activ_func)(combined)
+    mudelLopp = layers.Dense(num_classes, activation="softmax")(mudelLopp)
+
+    model = models.Model(inputs=[mudel1.input, mudel2.input], outputs=mudelLopp)
+    print(model.summary())
+
+    batch_size = 512
+    epochs = 5
+    model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["binary_accuracy"])
+    model.fit([x_tr_subinput, x_tr_input], y_tr_c, batch_size=batch_size, epochs=epochs, validation_split=0.2)
+    model.save(options['modelfile'])
+
+    
+    
+    #x_train_sat = np.expand_dims(x_train_sat, -1)
+    #x_train_ldr = np.expand_dims(x_train_ldr, -1)
+    """
+    inp_shape_1 = x_train_sat.shape[1:]
+    inp_shape_2 = x_train_ldr.shape[1:]
+    """
+    """
+    unique, counts = np.unique(y_train, return_counts=True)
+    y_train_wide = np.zeros((y_train.shape[0], len(unique)))
+    for i in range(len(unique)):
+        y_train_wide[:,i] = np.where(y_train == unique[i],1,0)
+    print(unique, counts)
     num_of_cl = (np.amax(y_train) + 1)
+    y_train_wide = keras.utils.to_categorical(y_train, num_of_cl)
     print(x_train_sat.shape)
-    satInput = Input(shape=(x_train_sat.shape[1], 1))
-    #satX = Conv2D(256, (x_train_sat.shape[1], x_train_sat.shape[2]), activation=activ_func)(satInput)
-    satX = Conv1D(256, (x_train_sat.shape[1]), activation=activ_func)(satInput)
+    
+    satInput = Input(shape=inp_shape_1)
+    satX = Conv1D(256, kernel_size=inp_shape_1[0], activation=activ_func)(satInput)
     satX = Flatten()(satX)
     satX = Dense(pow(num_of_cl, 3), activation = activ_func)(satX)
     satX = Dense(pow(num_of_cl, 2), activation = activ_func)(satX)
     satX = Model(inputs = satInput, outputs = satX)
-    #print(satX.summary())
 
-    ldrInput = Input(shape=(x_train_ldr.shape[1],))
+    ldrInput = Input(shape=inp_shape_2)
     ldrX = Dense(pow(num_of_cl, 3), activation = activ_func)(ldrInput)
     ldrX = Dense(pow(num_of_cl, 2), activation = activ_func)(ldrX)
     ldrX = Model(inputs = ldrInput, outputs = ldrX)
-    #print(ldrX.summary())
 
     combined = concatenate([satX.output, ldrX.output])
 
@@ -124,41 +178,57 @@ def fitModel(y_train, x_train_sat, x_train_ldr):
     finX = Dense(num_of_cl, activation='softmax')(finX)
 
     model = Model([satX.input, ldrX.input], outputs = finX)
-    print(model.summary())
+    #print(model.summary())
+    #print(x_train_sat)
+    #print(x_train_ldr)
+    #print(y_train)
+    
     model.compile(optimizer=optim_func, loss=loss_func, metrics=["accuracy"])
     history = model.fit([x_train_sat, x_train_ldr], y_train, epochs = epoch_count)
-    model.save(options['modelfile'])
+    """
 
 ############################################################################
 #
 ############################################################################
 def main():
     options, flags = gscript.parser()
+    print(options)
+    if not options['optimizer'] in ['adam', 'adamax', 'SGD']:
+        print("Wrong optimizer")
+        exit()
+    if not options['activation'] in ['relu', 'sigmoid', 'softmax', 'softplus', 'softsigh', 'tanh', 'selu', 'elu']:
+        print("Wrong activation")
+        exit()
 
-    input_files = gscript.read_command("i.group", group=options['input'], flags="g").split(os.linesep)[:-1]
-    print(input_files)
-    subinput_files = gscript.read_command("i.group", group=options['subinput'], flags="g").split(os.linesep)[:-1]
-    print(subinput_files)
-    
     class_raster = getData(options['classes'])
     print(class_raster.shape)
     y_train = class_raster[class_raster > 0]
     print(y_train.shape)
+    
+    input_files = gscript.read_command("i.group", group=options['input'], flags="g").split(os.linesep)[:-1]
+    print(input_files)
     x_train_input = np.zeros((y_train.shape[0], len(input_files)))
     print(x_train_input.shape)
     for i in range(len(input_files)):
         x_train_input[:,i] = getData(input_files[i])[class_raster > 0]
-    #subDims = tuple(np.array(options['subdims'].split(",")).astype(np.int))
-    #print(subDims)
 
-    #subinput_files = (options['subinput']).split(',')
-    x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)))
-    for i in range(len(subinput_files)):
-        x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
+    if len(options['subinput']) > 0:
+        subinput_files = gscript.read_command("i.group", group=options['subinput'], flags="g").split(os.linesep)[:-1]
+        print(subinput_files)
 
-    #x_train_subinput = x_train_subinput.reshape((x_train_subinput.shape[0], subDims[0], subDims[1]))
-    print(x_train_subinput.shape)
-    fitModel(y_train, x_train_subinput, x_train_input)
+        x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)))
+        for i in range(len(subinput_files)):
+            x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
+
+        print(x_train_subinput.shape)
+        with open('test.npy', 'wb') as f:
+            np.save(f, y_train)
+            np.save(f, x_train_input)
+            np.save(f, x_train_subinput)
+        
+        fitModelWithSub(y_train, x_train_subinput, x_train_input)
+    else:
+        print("Puudub")
     return 0
 
 
