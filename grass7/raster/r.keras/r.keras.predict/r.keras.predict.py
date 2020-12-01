@@ -68,6 +68,7 @@ from grass.exceptions import CalledModuleError
 from grass.pygrass.gis.region import Region
 from grass.pygrass.raster import RasterRow
 from grass.pygrass.raster import numpy2raster
+import psutil
 
 ############################################################################
 # Reading data from layer
@@ -100,22 +101,19 @@ def main():
     print(class_raster.shape)
     y_train = class_raster[class_raster > 0]
     print(y_train.shape)
-    x_train_input = np.zeros((y_train.shape[0], len(input_files)))
+    x_train_input = np.zeros((y_train.shape[0], len(input_files)), dtype=np.float32)
     print(x_train_input.shape)
     for i in range(len(input_files)):
         x_train_input[:,i] = getData(input_files[i])[class_raster > 0]
-    #subDims = tuple(np.array(options['subdims'].split(",")).astype(np.int))
-    #print(subDims)
 
-    #subinput_files = (options['subinput']).split(',')
-    x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)))
+    x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)), dtype=np.float32)
     for i in range(len(subinput_files)):
         x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
 
-    #x_train_subinput = x_train_subinput.reshape((x_train_subinput.shape[0], subDims[0], subDims[1]))
     print(x_train_subinput.shape)
     model = load_model(options['modelfile'])
-    resu_cl = model.predict([x_train_subinput, x_train_input], verbose=1)
+    num_cpus = psutil.cpu_count(logical=True)
+    resu_cl = model.predict([x_train_subinput, x_train_input], batch_size=128, use_multiprocessing=True, verbose=1, workers=num_cpus)
     resu = np.argmax(resu_cl, axis=1)
     predictions = np.zeros((class_raster.shape))
     predictions[class_raster > 0] = resu

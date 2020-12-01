@@ -41,6 +41,12 @@
 #% type: string
 #% description: model output file name
 #%end
+#%option
+#% key: epochs
+#% type: integer
+#% answer:10
+#% description: epoch count
+#%end
 #%option string
 #% key: activation
 #% label: Activation
@@ -61,7 +67,6 @@
 #%end
 
 import sys, os
-#import numpy as np
 
 import grass.script as gscript
 from grass.exceptions import CalledModuleError
@@ -77,6 +82,7 @@ import tensorflow as tf
 import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers, models
+import psutil
 
 
 
@@ -93,6 +99,59 @@ def getData(dataLayer):
         return data
     else:
         print("Is missing: ", dataLayer)
+        exit()
+
+
+############################################################################
+# 
+############################################################################
+def calcKappa(classes, predictions):
+    import sklearn.metrics as sm
+
+    resu = np.argmax(predictions, axis=1)
+    clas = np.argmax(classes, axis=1)
+    print("= Cohen's Kappa score: ===========================================")
+    print("{:.3f}".format(sm.cohen_kappa_score(clas, resu)))
+    print("= Confusion matrix: ==============================================")
+    print(sm.confusion_matrix(clas, resu))
+    print("= Classification report: =========================================")
+    print(sm.classification_report(clas, resu))
+
+    with open('result_data.npy', 'wb') as f:
+        np.save(f, classes)
+        np.save(f, predictions)
+    return 0
+        
+
+############################################################################
+#
+############################################################################
+def fitModelSingleLevel(y_tr, x_tr_input):
+    options, flags = gscript.parser()
+    batch_size = 512
+    epochs = int(options['epochs'])
+    
+    optim_func = options['optimizer']
+    loss_func = 'sparse_categorical_crossentropy'
+    activ_func = options['activation']
+
+    y_tr_c = keras.utils.to_categorical(y_tr)
+    num_classes = y_tr_c.shape[1]
+    
+    input_model = keras.Input(shape=x_tr_input.shape[1:])
+    input_sequence = layers.Dense(pow(num_classes, 3), activation=activ_func)(input_model)
+    input_sequence = layers.Dense(pow(num_classes, 2), activation=activ_func)(input_sequence)
+    input_sequence = layers.Dense(num_classes, activation="softmax")(input_sequence)
+    model_to_fit = models.Model(inputs = input_model, outputs = input_sequence)
+    print(model_to_fit.summary())
+    model_to_fit.compile(loss="categorical_crossentropy", optimizer=optim_func, metrics=["binary_accuracy"])
+    model_to_fit.fit(x_tr_input, y_tr_c, batch_size=batch_size, epochs=epochs, validation_split=0.2)
+    model_to_fit.save(options['modelfile'])
+    num_cpus = psutil.cpu_count(logical=True)
+    resu_cl = model_to_fit.predict(x_tr_input, batch_size=128, use_multiprocessing=True, verbose=1, workers=num_cpus)
+    calcKappa(y_tr_c, resu_cl)
+    return 0
+    
 
 
 ############################################################################
@@ -100,13 +159,12 @@ def getData(dataLayer):
 ############################################################################
 def fitModelWithSub(y_tr, x_tr_subinput, x_tr_input):
     options, flags = gscript.parser()
+    batch_size = 512
+    epochs = int(options['epochs'])
     
     optim_func = options['optimizer']
     loss_func = 'sparse_categorical_crossentropy'
-    #loss_func = 'categorical_crossentropy'
-    #loss_func = options['loss']
     activ_func = options['activation']
-    epoch_count = 5
 
     y_tr_c = keras.utils.to_categorical(y_tr)
     num_classes = y_tr_c.shape[1]
@@ -133,59 +191,20 @@ def fitModelWithSub(y_tr, x_tr_subinput, x_tr_input):
     mudelLopp = layers.Dense(64, activation=activ_func)(combined)
     mudelLopp = layers.Dense(num_classes, activation="softmax")(mudelLopp)
 
-    model = models.Model(inputs=[mudel1.input, mudel2.input], outputs=mudelLopp)
-    print(model.summary())
+    model_to_fit = models.Model(inputs=[mudel1.input, mudel2.input], outputs=mudelLopp)
+    print(model_to_fit.summary())
 
-    batch_size = 512
-    epochs = 5
-    model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["binary_accuracy"])
-    model.fit([x_tr_subinput, x_tr_input], y_tr_c, batch_size=batch_size, epochs=epochs, validation_split=0.2)
-    model.save(options['modelfile'])
+    model_to_fit.compile(loss="categorical_crossentropy", optimizer=optim_func, metrics=["binary_accuracy"])
+    model_to_fit.fit([x_tr_subinput, x_tr_input], y_tr_c, batch_size=batch_size, epochs=epochs, validation_split=0.2)
+    model_to_fit.save(options['modelfile'])
+    num_cpus = psutil.cpu_count(logical=True)
+    resu_cl = model_to_fit.predict([x_tr_subinput, x_tr_input], batch_size=128, use_multiprocessing=True, verbose=1, workers=num_cpus)
+    calcKappa(y_tr_c, resu_cl)
+    #resu = np.argmax(resu_cl, axis=1)
 
+    return 0
     
     
-    #x_train_sat = np.expand_dims(x_train_sat, -1)
-    #x_train_ldr = np.expand_dims(x_train_ldr, -1)
-    """
-    inp_shape_1 = x_train_sat.shape[1:]
-    inp_shape_2 = x_train_ldr.shape[1:]
-    """
-    """
-    unique, counts = np.unique(y_train, return_counts=True)
-    y_train_wide = np.zeros((y_train.shape[0], len(unique)))
-    for i in range(len(unique)):
-        y_train_wide[:,i] = np.where(y_train == unique[i],1,0)
-    print(unique, counts)
-    num_of_cl = (np.amax(y_train) + 1)
-    y_train_wide = keras.utils.to_categorical(y_train, num_of_cl)
-    print(x_train_sat.shape)
-    
-    satInput = Input(shape=inp_shape_1)
-    satX = Conv1D(256, kernel_size=inp_shape_1[0], activation=activ_func)(satInput)
-    satX = Flatten()(satX)
-    satX = Dense(pow(num_of_cl, 3), activation = activ_func)(satX)
-    satX = Dense(pow(num_of_cl, 2), activation = activ_func)(satX)
-    satX = Model(inputs = satInput, outputs = satX)
-
-    ldrInput = Input(shape=inp_shape_2)
-    ldrX = Dense(pow(num_of_cl, 3), activation = activ_func)(ldrInput)
-    ldrX = Dense(pow(num_of_cl, 2), activation = activ_func)(ldrX)
-    ldrX = Model(inputs = ldrInput, outputs = ldrX)
-
-    combined = concatenate([satX.output, ldrX.output])
-
-    finX = Dense(pow(num_of_cl, 2), activation = activ_func)(combined)
-    finX = Dense(num_of_cl, activation='softmax')(finX)
-
-    model = Model([satX.input, ldrX.input], outputs = finX)
-    #print(model.summary())
-    #print(x_train_sat)
-    #print(x_train_ldr)
-    #print(y_train)
-    
-    model.compile(optimizer=optim_func, loss=loss_func, metrics=["accuracy"])
-    history = model.fit([x_train_sat, x_train_ldr], y_train, epochs = epoch_count)
-    """
 
 ############################################################################
 #
@@ -207,7 +226,7 @@ def main():
     
     input_files = gscript.read_command("i.group", group=options['input'], flags="g").split(os.linesep)[:-1]
     print(input_files)
-    x_train_input = np.zeros((y_train.shape[0], len(input_files)))
+    x_train_input = np.zeros((y_train.shape[0], len(input_files)), dtype=np.float32)
     print(x_train_input.shape)
     for i in range(len(input_files)):
         x_train_input[:,i] = getData(input_files[i])[class_raster > 0]
@@ -216,19 +235,19 @@ def main():
         subinput_files = gscript.read_command("i.group", group=options['subinput'], flags="g").split(os.linesep)[:-1]
         print(subinput_files)
 
-        x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)))
+        x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)), dtype=np.float32)
         for i in range(len(subinput_files)):
             x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
 
         print(x_train_subinput.shape)
-        with open('test.npy', 'wb') as f:
+        with open('training_data.npy', 'wb') as f:
             np.save(f, y_train)
             np.save(f, x_train_input)
             np.save(f, x_train_subinput)
         
         fitModelWithSub(y_train, x_train_subinput, x_train_input)
     else:
-        print("Puudub")
+        print("Only single level data")
     return 0
 
 
