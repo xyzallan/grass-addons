@@ -226,7 +226,7 @@ def main():
     
     input_files = gscript.read_command("i.group", group=options['input'], flags="g").split(os.linesep)[:-1]
     print(input_files)
-    x_train_input = np.zeros((y_train.shape[0], len(input_files)), dtype=np.float32)
+    x_train_input = np.zeros((y_train.shape[0], len(input_files)), dtype=np.float16)
     print(x_train_input.shape)
     for i in range(len(input_files)):
         x_train_input[:,i] = getData(input_files[i])[class_raster > 0]
@@ -235,7 +235,7 @@ def main():
         subinput_files = gscript.read_command("i.group", group=options['subinput'], flags="g").split(os.linesep)[:-1]
         print(subinput_files)
 
-        x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)), dtype=np.float32)
+        x_train_subinput = np.zeros((y_train.shape[0], len(subinput_files)), dtype=np.float16)
         for i in range(len(subinput_files)):
             x_train_subinput[:,i] = getData(subinput_files[i])[class_raster > 0]
 
