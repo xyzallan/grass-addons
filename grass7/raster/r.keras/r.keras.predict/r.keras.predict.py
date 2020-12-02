@@ -118,6 +118,12 @@ def main():
     predictions = np.zeros((class_raster.shape))
     predictions[class_raster > 0] = resu
     numpy2raster(array=predictions, mtype='CELL', rastname=options['output'], overwrite=True)
+    for i in range(1, resu_cl.shape[1]):
+        predictions = np.zeros((class_raster.shape))
+        predictions[class_raster > 0] = resu_cl[:,i]
+        numpy2raster(array=predictions, mtype='FCELL', rastname="probs_pred_{}".format(i), overwrite=True)
+
+    
     return 0
 
 if __name__ == "__main__":

@@ -202,7 +202,7 @@ def fitModelWithSub(y_tr, x_tr_subinput, x_tr_input):
     calcKappa(y_tr_c, resu_cl)
     #resu = np.argmax(resu_cl, axis=1)
 
-    return 0
+    return resu_cl
     
     
 
@@ -245,9 +245,15 @@ def main():
             np.save(f, x_train_input)
             np.save(f, x_train_subinput)
         
-        fitModelWithSub(y_train, x_train_subinput, x_train_input)
+        results = fitModelWithSub(y_train, x_train_subinput, x_train_input)
     else:
-        print("Only single level data")
+        results = fitModelSingleLevel(y_train, x_train_input)
+
+    for i in range(1, results.shape[1]):
+        predictions = np.zeros((class_raster.shape), dtype=np.float16)
+        predictions[class_raster > 0] = results[:,i]
+        numpy2raster(array=predictions, mtype='FCELL', rastname="probs_mld_{}".format(i), overwrite=True)
+    
     return 0
 
 
